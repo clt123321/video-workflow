@@ -1,18 +1,22 @@
-
 import json
+import logging
 from openai import OpenAI
 
 # 本地配置代理，和clash端口保持一致
 import os
+
 os.environ["http_proxy"] = "http://localhost:7897"
 os.environ["https_proxy"] = "http://localhost:7897"
+
+logger = logging.getLogger(__name__)
 
 # 设置 OpenAI API 密钥
 api_key = "xxxxxxxxxxxxxxxxxxxxx"
 client = OpenAI(api_key = api_key)
 
+
 def get_llm_response(
-    system_prompt, prompt, json_format=True, model="gpt-4-1106-preview"
+        system_prompt, prompt, json_format=True, model="gpt-4-1106-preview"
 ):
     messages = [
         {
@@ -53,3 +57,26 @@ def get_llm_response(
             logger.error(f"GPT Error: {e}")
             continue
     return "GPT Error"
+
+
+import logging
+import pickle
+from typing import Optional
+
+cache_llm = pickle.load(open("../../data/cache/cache_llm.pkl", "rb"))
+
+def save_to_cache(key: str, value: str):
+    return None
+
+def get_from_cache(key: str) -> Optional[str]:
+    try:
+        return cache_llm[key.encode()].decode()
+    except Exception as e:
+        logging.warning(f"Error getting from cache: {e}")
+    return None
+
+
+if __name__ == '__main__':
+    # 测试api正常使用
+    response = get_llm_response("sss", "who are you", json_format=False)
+    print(response)
