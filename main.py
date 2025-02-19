@@ -19,7 +19,7 @@ def main():
     logger.info("Hello World")
     input_q_a_file = "data/input/subset_anno.json"  # 问题id和问题内容
     image_cap_file = "data/input/lavila_subset.json"  # 用lavila预处理，每帧的字幕文本
-    output_json = "data/output/egoschema_subset.json"  # 日志存储
+    output_json = "data/output/egoschema_subset.json"  # 运行结果存储
 
     anns = json.load(open(input_q_a_file, "r"))
     all_caps = json.load(open(image_cap_file, "r"))
