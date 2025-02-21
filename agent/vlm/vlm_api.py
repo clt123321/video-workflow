@@ -11,7 +11,7 @@ if __name__ == '__main__':
         return f"data:image/{image_path.split('.')[-1]};base64,{encoded_string}"
 
     # 替换为你的图片路径
-    image_path = "C:\\Users\clt\Pictures\猫.jpg"
+    image_path = "../..//data/input/image/猫.jpg"
     image_base64 = image_to_base64(image_path)
 
     # 2. 创建LangChain ChatOllama实例
