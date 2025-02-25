@@ -49,7 +49,7 @@ def build_text_vector_db():
 # ================= 多模态RAG系统，向量数据库内为文本信息 =================
 class MultiModalRAG:
     def __init__(self):
-        # 加载新版嵌入模型
+        # 加载新版嵌入模型 ps:需要开vpn
         self.embeddings = HuggingFaceEmbeddings(
             model_name="sentence-transformers/all-MiniLM-L6-v2",
             model_kwargs={"device": "cuda"},  # 启用GPU加速
@@ -67,7 +67,7 @@ class MultiModalRAG:
         self.llava = ChatOllama(
             model="llava",  # 确保本地已下载模型：ollama pull llava
             base_url="http://localhost:11434",
-            temperature=0.7
+            temperature=0
         )
 
     def _encode_image(self, path):
@@ -115,7 +115,7 @@ class MultiModalRAG:
             {"type": "text", "text": final_prompt},
             {"type": "image_url", "image_url": {"url": img_base64}}
         ])]
-        res = self.llava.invoke(messages2).content
+        res = self.llava.invoke(messages2).contentruhe
         print("llava response to question: ", res)
         # 计算并打印执行时间
         end_time = time.time()

@@ -13,6 +13,7 @@ def run_one_question(video_id, ann, caps, answer_json):
         answer_json: 日志对象，用于记录最终答案。
     """
     logger.info("*******************begin to run_one_question****************")
+
     answer_json[video_id] = {
         "answer": 1,
         "label": 1,

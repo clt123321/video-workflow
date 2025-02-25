@@ -1,9 +1,13 @@
+import time
+
 from langchain_community.chat_models import ChatOllama
 from langchain_core.messages import HumanMessage
 import base64
 
 
 if __name__ == '__main__':
+    # 记录开始时间
+    start_time = time.time()
     # 1. 准备图片的Base64编码
     def image_to_base64(image_path):
         with open(image_path, "rb") as image_file:
@@ -34,3 +38,7 @@ if __name__ == '__main__':
     # 4. 发送请求并获取响应
     response = llava_chat.invoke(messages)
     print("模型回复：", response.content)
+    # 计算并打印执行时间
+    end_time = time.time()
+    execution_time = end_time - start_time
+    print(f"finish ask_vlm, running cost time {execution_time:.6f} seconds")
