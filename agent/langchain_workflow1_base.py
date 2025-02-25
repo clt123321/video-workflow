@@ -1,4 +1,5 @@
 import time
+import logging
 from io import BytesIO
 
 from langchain_community.document_loaders import TextLoader
@@ -12,10 +13,11 @@ import base64
 
 from data.prompt.const_prompt import TEST_PROMPT, DEFAULT_PROMPT, DESCRIBE_PROMPT, DESCRIBE_PROMPT_BASE
 
+logger = logging.getLogger(__name__)
 
 # ================= 文本向量知识库构建 =================
 def build_text_vector_db():
-    print("start to build_text_vector_db")
+    logger.info("start to build_text_vector_db")
     # 记录开始时间
     start_time = time.time()
     # 加载文本
@@ -43,12 +45,13 @@ def build_text_vector_db():
     # 计算并打印执行时间
     end_time = time.time()
     execution_time = end_time - start_time
-    print(f"finish build_text_vector_db, cost time {execution_time:.6f} seconds")
+    logger.info(f"finish build_text_vector_db, cost time {execution_time:.6f} seconds")
 
 
 # ================= 多模态RAG系统，向量数据库内为文本信息 =================
 class MultiModalRAG:
     def __init__(self):
+        logger.info("init MultiModalRAG")
         # 加载新版嵌入模型 ps:需要开vpn
         self.embeddings = HuggingFaceEmbeddings(
             model_name="sentence-transformers/all-MiniLM-L6-v2",
@@ -58,7 +61,7 @@ class MultiModalRAG:
 
         # 加载向量数据库
         self.vector_db = FAISS.load_local(
-            "red_dream",
+            ".\\agent\\red_dream",
             self.embeddings,
             allow_dangerous_deserialization=True  # 需要安全确认
         )
@@ -79,7 +82,8 @@ class MultiModalRAG:
             return f"data:image/jpeg;base64,{base64.b64encode(buffered.getvalue()).decode()}"
 
     def ask_vlm(self, question, image_path, prompt=None):
-        print(f"start to ask_vlm, question: {question}")
+        logger.info(f"base class, start to ask_vlm, question: {question}")
+        logger.info(f"start to ask_vlm, question: {question}")
         # 记录开始时间
         start_time = time.time()
         # step1:图像编码
@@ -95,34 +99,34 @@ class MultiModalRAG:
             )
         ]
         image_description = self.llava.invoke(message_image_des).content
-        print(f"image_description:{image_description}")
+        logger.info(f"image_description:{image_description}")
 
         # step3:知识检索（增强top3上下文）
         context = "\n".join([
             doc.page_content
             for doc in self.vector_db.similarity_search(image_description, k=3)
         ])
-        print(f"knowledge retrieval from vector_db is: {context}")
+        logger.info(f"knowledge retrieval from vector_db is: {context}")
 
         # step4:根据召回，构建提示词，并回答相关问题
-        default_prompt = DEFAULT_PROMPT
-        final_prompt = (prompt or default_prompt).format(
-            context=context,
-            question=question
-        )
-        print(f"final_prompt: {final_prompt}")
-        messages2 = [HumanMessage(content=[
-            {"type": "text", "text": final_prompt},
-            {"type": "image_url", "image_url": {"url": img_base64}}
-        ])]
-        res = self.llava.invoke(messages2).contentruhe
-        print("llava response to question: ", res)
+        # default_prompt = DEFAULT_PROMPT
+        # final_prompt = (prompt or default_prompt).format(
+        #     context=context,
+        #     question=question
+        # )
+        # logger.info(f"final_prompt: {final_prompt}")
+        # messages2 = [HumanMessage(content=[
+        #     {"type": "text", "text": final_prompt},
+        #     {"type": "image_url", "image_url": {"url": img_base64}}
+        # ])]
+        # res = self.llava.invoke(messages2).content
+        # logger.info("llava response to question: ", res)
         # 计算并打印执行时间
         end_time = time.time()
         execution_time = end_time - start_time
-        print(f"finish ask_vlm, running cost time {execution_time:.6f} seconds")
+        logger.info(f"finish ask_vlm, running cost time {execution_time:.6f} seconds")
         # 获取响应
-        return res
+        return image_description
 
 
 # ================= 使用示例 =================
