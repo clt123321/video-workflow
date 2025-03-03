@@ -11,9 +11,11 @@ from langchain_core.messages import HumanMessage
 from PIL import Image
 import base64
 
+from config import PROJECT_ROOT
 from data.prompt.const_prompt import TEST_PROMPT, DEFAULT_PROMPT, DESCRIBE_PROMPT, DESCRIBE_PROMPT_BASE
 
 logger = logging.getLogger(__name__)
+
 
 # ================= 文本向量知识库构建 =================
 def build_text_vector_db():
@@ -21,7 +23,7 @@ def build_text_vector_db():
     # 记录开始时间
     start_time = time.time()
     # 加载文本
-    loader = TextLoader("../data/input/text/red_dream.txt", encoding="utf-8")
+    loader = TextLoader(PROJECT_ROOT + "/data/input/text/red_dream.txt", encoding="utf-8")
     documents = loader.load()
 
     # 文本分块
@@ -60,8 +62,9 @@ class MultiModalRAG:
         )
 
         # 加载向量数据库
+        vector_db_path = str(PROJECT_ROOT) + "/agent/red_dream"
         self.vector_db = FAISS.load_local(
-            ".\\agent\\red_dream",
+            vector_db_path,
             self.embeddings,
             allow_dangerous_deserialization=True  # 需要安全确认
         )
@@ -86,14 +89,12 @@ class MultiModalRAG:
         logger.info(f"start to ask_vlm, question: {question}")
         # 记录开始时间
         start_time = time.time()
-        # step1:图像编码
+        # step1:调用vlm获取图片文本描述
         img_base64 = self._encode_image(image_path)
-
-        # step2:调用vlm获取图片文本描述
         message_image_des = [
             HumanMessage(
                 content=[
-                    {"type": "text", "text": DESCRIBE_PROMPT},
+                    {"type": "text", "text": DESCRIBE_PROMPT_BASE},
                     {"type": "image_url", "image_url": {"url": img_base64}}
                 ]
             )
@@ -101,14 +102,14 @@ class MultiModalRAG:
         image_description = self.llava.invoke(message_image_des).content
         logger.info(f"image_description:{image_description}")
 
-        # step3:知识检索（增强top3上下文）
+        # step2:知识检索（增强top3上下文）
         context = "\n".join([
             doc.page_content
             for doc in self.vector_db.similarity_search(image_description, k=3)
         ])
         logger.info(f"knowledge retrieval from vector_db is: {context}")
 
-        # step4:根据召回，构建提示词，并回答相关问题
+        # step3:根据召回，构建提示词，并回答相关问题
         # default_prompt = DEFAULT_PROMPT
         # final_prompt = (prompt or default_prompt).format(
         #     context=context,
@@ -127,6 +128,17 @@ class MultiModalRAG:
         logger.info(f"finish ask_vlm, running cost time {execution_time:.6f} seconds")
         # 获取响应
         return image_description
+
+    # SwiftSage；Agent 分为快速直觉系统（S1）和慢速规划系统（S2）。S1 负责快速生成初步计划，S2 通过反思和外部工具验证计划的可行性。
+    def give_answer_method1(self, video_id, question, options):
+        formatted_question = (
+                f"Here is the question: {question}\n"
+                + "Here are the choices: "
+                + " ".join([f"{i}. {ans}" for i, ans in enumerate(options)])
+        )
+
+        logger.info(f"formatted_question = {formatted_question}")
+        pass
 
 
 # ================= 使用示例 =================

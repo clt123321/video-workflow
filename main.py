@@ -37,10 +37,11 @@ def main():
     answer_json = {}
 
     task_id_list = list(anns.keys())  # 全量任务
-    video_id = task_id_list[0]
-    run_one_question(video_id, anns[video_id], all_caps[video_id], answer_json)
-    json.dump(answer_json, open(output_json, "w"))
 
+    for i in range(1):
+        video_id = task_id_list[i]
+        run_one_question(video_id, anns[video_id], all_caps[video_id], answer_json)
+        json.dump(answer_json, open(output_json, "w"))
 
 # Press the green button in the gutter to run the script.
 if __name__ == '__main__':

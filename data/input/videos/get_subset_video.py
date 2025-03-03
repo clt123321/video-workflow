@@ -27,7 +27,7 @@ if __name__ == "__main__":
     for q_uid in tqdm(questions):
         print(q_uid)
         # 移动到当前文件夹下
-        source_path = "D:\迅雷下载\egoschema-public\\videos\\videos"
+        source_path = ".\egoschema-public\\videos\\videos"
         dest_path = "./sub_egoschema"
         move_file(source_path + "\\" + q_uid + ".mp4", dest_path)
 
