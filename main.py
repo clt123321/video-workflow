@@ -2,6 +2,7 @@ import json
 import logging
 from concurrent.futures import ThreadPoolExecutor
 
+from agent.langchain_workflow1 import MultiModalRAG
 from agent.work_flow import run_one_question
 
 logger = logging.getLogger(__name__)
@@ -37,11 +38,14 @@ def main():
     answer_json = {}
 
     task_id_list = list(anns.keys())  # 全量任务
+    # step 初始化系统
+    rag_system = MultiModalRAG()
 
     for i in range(1):
         video_id = task_id_list[i]
-        run_one_question(video_id, anns[video_id], all_caps[video_id], answer_json)
+        run_one_question(video_id, anns[video_id], all_caps[video_id], answer_json, rag_system)
         json.dump(answer_json, open(output_json, "w"))
+
 
 # Press the green button in the gutter to run the script.
 if __name__ == '__main__':

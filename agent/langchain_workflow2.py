@@ -1,7 +1,7 @@
 import time
 
-from agent.langchain_workflow1_base import MultiModalRAG
-from data.prompt.const_prompt import VLM_TEST_PROMPT
+from agent.langchain_workflow1 import MultiModalRAG
+from data.prompt.const_prompt import LLM_POLICY_GENERATION_PROMPT
 
 
 class MultiModalRAG_IMAGE(MultiModalRAG):
@@ -27,7 +27,7 @@ if __name__ == '__main__':
     rag_system = MultiModalRAG_IMAGE()
 
     # 示例查询
-    prompt = VLM_TEST_PROMPT
+    prompt = LLM_POLICY_GENERATION_PROMPT
     response = rag_system.ask_vlm(
         question="why the image related to context, give me reasons?",
         image_path="../data/input/image/red_dream.png",

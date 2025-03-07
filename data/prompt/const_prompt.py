@@ -1,4 +1,5 @@
 VLM_DESCRIBE_PROMPT_BASE= "What is in the image?"
+VLM_IMAGE_CAPTION_PROMPT_BASE= "What is in the image?"
 VLM_DESCRIBE_PROMPT = """What is in this picture? Visual Scene Analysis Prompt
 Please analyze the image through these lenses:
 1. Objective Observations (Must be strictly based on visible elements):
@@ -28,7 +29,9 @@ Confidence tiers:
 ? Medium (40-79% contextual support)
 ▽ Low (<40% evidentiary basis)"""
 
-VLM_TEST_PROMPT = """You are an advanced AI agent tasked with efficiently and accurately
+# 分析问题的类型，选择采样方式
+# from avua, Policy Generation Prompt
+LLM_POLICY_GENERATION_PROMPT = """You are an advanced AI agent tasked with efficiently and accurately
 processing video question and answering tasks.
 You will be given a question related to a video, and you are responsibile
 for coming up with a set of tactics and plans based on the characteristics

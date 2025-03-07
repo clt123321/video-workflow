@@ -15,7 +15,6 @@ from PIL import Image
 import base64
 
 from config import PROJECT_ROOT
-from data.prompt.const_prompt import VLM_TEST_PROMPT, DEFAULT_PROMPT, VLM_DESCRIBE_PROMPT, VLM_DESCRIBE_PROMPT_BASE
 
 logger = logging.getLogger(__name__)
 
@@ -103,7 +102,7 @@ class MultiModalRAG:
         )
 
         # 加载向量数据库
-        vector_db_path = str(PROJECT_ROOT) + "/agent/red_dream"
+        vector_db_path = PROJECT_ROOT + "/agent/red_dream"
         self.vector_db = FAISS.load_local(
             vector_db_path,
             self.embeddings,
@@ -133,17 +132,16 @@ class MultiModalRAG:
             img.save(buffered, format="JPEG")
             return f"data:image/jpeg;base64,{base64.b64encode(buffered.getvalue()).decode()}"
 
-    def ask_vlm(self, question, image_path, prompt=None):
-        logger.info(f"base class, start to ask_vlm, question: {question}")
-        logger.info(f"start to ask_vlm, question: {question}")
+    def ask_vlm(self, image_path, prompt=None):
+        logger.info(f"start to ask_vlm, prompt: {prompt}")
         # 记录开始时间
         start_time = time.time()
-        # step1:调用vlm获取图片文本描述
+        # 调用vlm获取图片文本描述
         img_base64 = self._encode_image(image_path)
         message_image_des = [
             HumanMessage(
                 content=[
-                    {"type": "text", "text": VLM_DESCRIBE_PROMPT_BASE},
+                    {"type": "text", "text": prompt},
                     {"type": "image_url", "image_url": {"url": img_base64}}
                 ]
             )
@@ -151,32 +149,21 @@ class MultiModalRAG:
         image_description = self.llava.invoke(message_image_des).content
         logger.info(f"image_description:{image_description}")
 
-        # step2:知识检索（增强top3上下文）
-        context = "\n".join([
-            doc.page_content
-            for doc in self.vector_db.similarity_search(image_description, k=3)
-        ])
-        logger.info(f"knowledge retrieval from vector_db is: {context}")
-
-        # step3:根据召回，构建提示词，并回答相关问题
-        # default_prompt = DEFAULT_PROMPT
-        # final_prompt = (prompt or default_prompt).format(
-        #     context=context,
-        #     question=question
-        # )
-        # logger.info(f"final_prompt: {final_prompt}")
-        # messages2 = [HumanMessage(content=[
-        #     {"type": "text", "text": final_prompt},
-        #     {"type": "image_url", "image_url": {"url": img_base64}}
-        # ])]
-        # res = self.llava.invoke(messages2).content
-        # logger.info("llava response to question: ", res)
         # 计算并打印执行时间
         end_time = time.time()
         execution_time = end_time - start_time
         logger.info(f"finish ask_vlm, running cost time {execution_time:.6f} seconds")
-        # 获取响应
+
         return image_description
+
+    def retrieve_from_vector_db(self, vector_db, text, k):
+        # 知识检索（增强top3上下文）
+        context = "\n".join([
+            doc.page_content
+            for doc in vector_db.similarity_search(text, k=k)
+        ])
+        logger.info(f"knowledge retrieval from vector_db is: {context}")
+        return context
 
     # SwiftSage；Agent 分为快速直觉系统（S1）和慢速规划系统（S2）。S1 负责快速生成初步计划，S2 通过反思和外部工具验证计划的可行性。
     def give_answer_method1(self, video_id, question, options):
@@ -197,7 +184,6 @@ class MultiModalRAG:
             ("system", system_prompt),  # 系统提示词
             ("human", "{input}")
         ])
-
         # 创建执行链
         chain = prompt_template | self.deepseek_r1  # 管道操作符，表示将前一个组件的输出作为后一个组件的输入
         response = chain.invoke({
@@ -208,27 +194,15 @@ class MultiModalRAG:
         # 计算并打印执行时间
         end_time = time.time()
         execution_time = end_time - start_time
-        print(f"finish ask_llm, running cost time {execution_time:.6f} seconds")
+        logger.info(f"finish ask_llm, running cost time {execution_time:.6f} seconds")
         return parsed_response
 
 
 # ================= 使用示例 =================
 if __name__ == "__main__":
-    # 首次使用需要构建知识库
+    # 0.首次使用需要构建知识库
     # build_text_vector_db()
 
-    # 初始化系统
+    # 1.初始化系统
     rag_system = MultiModalRAG()
 
-    # 示例查询
-    # response = rag_system.ask_vlm(
-    #     question="why the image related to context, give me reasons?",
-    #     image_path="../data/input/image/red_dream.png",
-    #     prompt=None
-    # )
-
-    question = "怎么写一个线程池，要求逻辑清晰"
-    parsed_response = rag_system.ask_llm(question=question, system_prompt="you are a helpful ai assistant")
-
-    print("思考过程：\n", parsed_response["thought"])
-    print("回答：\n", parsed_response["answer"])

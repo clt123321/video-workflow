@@ -4,9 +4,11 @@ import os
 
 import cv2
 
-from agent.langchain_workflow1_base import MultiModalRAG
+from config import PROJECT_ROOT
+from data.prompt.const_prompt import DEFAULT_PROMPT
 
 logger = logging.getLogger(__name__)
+
 
 def process_video(video_path, target_frames=None, save_dir=None,
                   count_actual_frame=False):
@@ -92,7 +94,7 @@ def generate_uniform_frames(fps, duration):
     return sorted(list(set(frames)))
 
 
-def run_one_question(video_id, ann, caps, answer_json):
+def run_one_question(video_id, ann, caps, answer_json,rag_system):
     """
     处理单个视频问题的函数。
 
@@ -107,17 +109,20 @@ def run_one_question(video_id, ann, caps, answer_json):
     question = ann["question"]
     options = [ann[f"option {i}"] for i in range(5)]
     # extract_frame(video_id)
-    # step1 初始化系统
-    rag_system = MultiModalRAG()
-    rag_system.give_answer_method1(video_id, question, options)
 
-    # step 2 示例查询
-    response = rag_system.ask_vlm(
-        question="why the image related to context, give me reasons?",
-        image_path="./data/input/image/red_dream.png",
-        prompt=None
+    # rag_system.give_answer_method1(video_id, question, options)
+
+
+    # 测试图像caption
+    rag_system.ask_vlm(
+        image_path=PROJECT_ROOT + "/data/input/image/red_dream.png",
+        prompt="give me a caption about this image"
     )
-    logging.info(f"response: {response}")
+    # 3.示例rag查询vlm
+    # test_rag_vlm(rag_system)
+
+    # 4.示例查询llm
+    # test_llm(rag_system)
 
     # step3 保存并校验答案
     truth = ann["truth"]
@@ -131,6 +136,31 @@ def run_one_question(video_id, ann, caps, answer_json):
     logger.info(f"video_id ={video_id}, end to run_one_question")
     logger.info("***********************************")
 
+
+def test_rag_vlm(rag_system):
+    # 1.示例rag查询VLM
+    image_description = rag_system.ask_vlm(
+        image_path=PROJECT_ROOT + "/data/input/image/red_dream.png",
+        prompt="what is in the image?"
+    )
+    # 2.从向量数据库内召回最相关的文本
+    context = rag_system.retrieve_from_vector_db(rag_system.vector_db, image_description, k=3)
+    # 3.根据召回，构建提示词，并回答相关问题
+    final_prompt = DEFAULT_PROMPT.format(
+        context=context,
+        question=""
+    )
+    rag_system.ask_vlm(
+        image_path=PROJECT_ROOT + "/data/input/image/red_dream.png",
+        prompt=final_prompt
+    )
+
+
+def test_llm(rag_system):
+    question = "请写一个反转列表的代码"
+    parsed_response = rag_system.ask_llm(question=question, system_prompt="you are a helpful ai assistant")
+    logger.info("思考过程：\n" + parsed_response["thought"])
+    logger.info("回答：\n" + parsed_response["answer"])
 
 def extract_frame(video_id):
     stats = process_video(
