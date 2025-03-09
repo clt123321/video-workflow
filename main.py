@@ -31,20 +31,17 @@ def main():
     logger.info("start main")
     input_q_a_file = "data/input/subset_anno.json"  # 问题id和问题内容
     image_cap_file = "data/input/lavila_subset.json"  # 用lavila预处理，每帧的字幕文本
-    output_json = "data/output/egoschema_subset.json"  # 运行结果存储
 
     anns = json.load(open(input_q_a_file, "r"))
     all_caps = json.load(open(image_cap_file, "r"))
-    answer_json = {}
 
     task_id_list = list(anns.keys())  # 全量任务
     # step 初始化系统
     rag_system = MultiModalRAG()
 
-    for i in range(1):
+    for i in range(2):
         video_id = task_id_list[i]
-        run_one_question(video_id, anns[video_id], all_caps[video_id], answer_json, rag_system)
-        json.dump(answer_json, open(output_json, "w"))
+        run_one_question(video_id, anns[video_id], all_caps[video_id], rag_system)
 
 
 # Press the green button in the gutter to run the script.

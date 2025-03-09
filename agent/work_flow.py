@@ -1,11 +1,13 @@
 import logging
 import time
+import json
 import os
 
 import cv2
 
+from agent.langchain_workflow1 import clean_vector_db
 from config import PROJECT_ROOT
-from data.prompt.const_prompt import DEFAULT_PROMPT
+from data.prompt.const_prompt import LLM_GET_ANSWER_SYSTEM_PROMPT, LLM_DEFAULT_SYSTEM_PROMPT
 
 logger = logging.getLogger(__name__)
 
@@ -94,49 +96,6 @@ def generate_uniform_frames(fps, duration):
     return sorted(list(set(frames)))
 
 
-def run_one_question(video_id, ann, caps, answer_json,rag_system):
-    """
-    处理单个视频问题的函数。
-
-    参数:
-        video_id : 视频的唯一标识符
-        ann : 问题
-        caps : 视频每帧的字幕数据
-        answer_json: 日志对象，用于记录最终答案。
-    """
-    logger.info("***********************************")
-    logger.info(f"video_id ={video_id},begin to run_one_question")
-    question = ann["question"]
-    options = [ann[f"option {i}"] for i in range(5)]
-    # extract_frame(video_id)
-
-    # rag_system.give_answer_method1(video_id, question, options)
-
-
-    # 测试图像caption
-    rag_system.ask_vlm(
-        image_path=PROJECT_ROOT + "/data/input/image/red_dream.png",
-        prompt="give me a caption about this image"
-    )
-    # 3.示例rag查询vlm
-    # test_rag_vlm(rag_system)
-
-    # 4.示例查询llm
-    # test_llm(rag_system)
-
-    # step3 保存并校验答案
-    truth = ann["truth"]
-    logger.info(f"truth ={truth}")
-    answer_json[video_id] = {
-        "answer": 1,
-        "label": 1,
-        "corr": 1,
-        "count_frame": 1,
-    }
-    logger.info(f"video_id ={video_id}, end to run_one_question")
-    logger.info("***********************************")
-
-
 def test_rag_vlm(rag_system):
     # 1.示例rag查询VLM
     image_description = rag_system.ask_vlm(
@@ -144,9 +103,9 @@ def test_rag_vlm(rag_system):
         prompt="what is in the image?"
     )
     # 2.从向量数据库内召回最相关的文本
-    context = rag_system.retrieve_from_vector_db(rag_system.vector_db, image_description, k=3)
+    context = rag_system.retrieve_from_vector_db(rag_system.fact_vector_db, image_description, k=3)
     # 3.根据召回，构建提示词，并回答相关问题
-    final_prompt = DEFAULT_PROMPT.format(
+    final_prompt = LLM_GET_ANSWER_SYSTEM_PROMPT.format(
         context=context,
         question=""
     )
@@ -158,9 +117,10 @@ def test_rag_vlm(rag_system):
 
 def test_llm(rag_system):
     question = "请写一个反转列表的代码"
-    parsed_response = rag_system.ask_llm(question=question, system_prompt="you are a helpful ai assistant")
+    parsed_response = rag_system.ask_llm(prompt=question, system_prompt=LLM_DEFAULT_SYSTEM_PROMPT)
     logger.info("思考过程：\n" + parsed_response["thought"])
     logger.info("回答：\n" + parsed_response["answer"])
+
 
 def extract_frame(video_id):
     stats = process_video(
@@ -175,3 +135,47 @@ def extract_frame(video_id):
     - FPS: {stats['fps']:.2f}
     - duration_sec: {stats['duration_sec']:.2f} seconds
     """)
+
+
+def run_one_question(video_id, ann, caps, rag_system):
+    """
+    处理单个视频问题的函数。
+
+    参数:
+        video_id : 视频的唯一标识符
+        ann : 问题
+        caps : 视频每帧的字幕数据
+    """
+    # 记录开始时间
+    start_time = time.time()
+    logger.info("***********************************")
+    logger.info(f"video_id ={video_id},begin to run_one_question")
+    question = ann["question"]
+    options = [ann[f"option {i}"] for i in range(5)]
+    # extract_frame(video_id) # 首次运行可以抽视频保存为图像，校验数据集的完整性、
+    # 运行workflow，回答问题
+    formatted_question = (
+            f"Here is the question: {question}\n"
+            + "Here are the choices: "
+            + " ".join([f"{i}. {ans}" for i, ans in enumerate(options)])
+    )
+    logger.info(f"formatted_question = {formatted_question}")
+    truth = ann["truth"]
+    logger.info(f"truth ={truth}")
+    answer, count_frame = rag_system.get_answer(video_id, formatted_question, caps)
+    # 计算并打印执行时间
+    end_time = time.time()
+    execution_time = end_time - start_time
+
+    # 保存并校验答案
+    answer_json = {
+        "answer": answer,
+        "label": truth,
+        "corr": answer == truth,
+        "count_frame": count_frame,
+        "execution_time": execution_time,
+    }
+    output_json = PROJECT_ROOT + f"data/output/answer/egoschema_subset_{video_id}.json"  # 运行结果存储
+    json.dump(answer_json, open(output_json, "w"))
+    logger.info(f"video_id ={video_id}, end to run_one_question")
+    logger.info("***********************************")
