@@ -1,9 +1,11 @@
 import json
 import logging
+import os
 from concurrent.futures import ThreadPoolExecutor
 
 from agent.langchain_workflow1 import MultiModalRAG
 from agent.work_flow import run_one_question
+from config import PROJECT_ROOT
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +42,15 @@ def main():
 
     for i in range(500):
         video_id = task_id_list[i]
+        # 跳过已经得到答案的
+        output_json_path = os.path.join(
+            PROJECT_ROOT,
+            "data/output/answer",
+            f"egoschema_subset_{video_id}.json"
+        )
+        if os.path.exists(output_json_path):
+            continue
+        # 回答问题
         run_one_question(video_id, anns[video_id], all_caps[video_id], rag_system)
 
 
