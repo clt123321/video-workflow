@@ -140,11 +140,6 @@ def get_image_path_by_frame_id(video_id, frame_id):
     )
 
 
-def parsed_answer_s2(answer_str):
-    answer = parse_text_find_number(answer_str)
-    return answer
-
-
 def parse_json(text):
     try:
         # First, try to directly parse the text as JSON
@@ -204,6 +199,41 @@ def split_image_description(image_description):
     pass
 
 
+import pickle
+import shelve
+import hashlib
+
+
+class LLMCache:
+    def __init__(self, cache_dir=PROJECT_ROOT + "/data/cache"):
+        os.makedirs(cache_dir, exist_ok=True)
+        self.cache_file = os.path.join(cache_dir, "llm_cache.pkl")
+
+    def _generate_key(self, system_prompt: str, prompt: str) -> str:
+        """基于 system_prompt 和 prompt 生成唯一的缓存 key"""
+        key_data = json.dumps([system_prompt, prompt], sort_keys=True)
+        return hashlib.sha256(key_data.encode()).hexdigest()  # 生成哈希 key
+
+    def get_from_cache(self, system_prompt: str, prompt: str):
+        """从缓存中获取结果"""
+        key = self._generate_key(system_prompt, prompt)
+        try:
+            with shelve.open(self.cache_file, flag="r") as cache:
+                return cache.get(key, None)
+        except Exception as e:
+            logging.warning(f"read llm_cache failed: {e}")
+        return None
+
+    def save_to_cache(self, system_prompt: str, prompt: str, response: str):
+        """将 LLM 响应存入缓存"""
+        key = self._generate_key(system_prompt, prompt)
+        try:
+            with shelve.open(self.cache_file) as cache:
+                cache[key] = response
+        except Exception as e:
+            logging.warning(f"保存缓存失败: {e}")
+
+
 class MultiModalRAG:
     def __init__(self):
         logger.info("init MultiModalRAG")
@@ -214,19 +244,19 @@ class MultiModalRAG:
             encode_kwargs={"normalize_embeddings": True}
         )
 
-        # 初始化事实向量数据库
-        self.fact_vector_db = self.init_vector_db("fact_vector_db")
-
-        # 初始化推测向量数据库
-        self.spec_vector_db = self.init_vector_db("spec_vector_db")
-
-        # 初始化LLaVA
-        self.llava = ChatOllama(
-            model="llava",  # 确保本地已下载模型：ollama run llava
-            base_url="http://localhost:11434",
-            temperature=0.6,
-            max_tokens=512
-        )
+        # # 初始化事实向量数据库
+        # self.fact_vector_db = self.init_vector_db("fact_vector_db")
+        #
+        # # 初始化推测向量数据库
+        # self.spec_vector_db = self.init_vector_db("spec_vector_db")
+        #
+        # # 初始化LLaVA
+        # self.llava = ChatOllama(
+        #     model="llava",  # 确保本地已下载模型：ollama run llava
+        #     base_url="http://localhost:11434",
+        #     temperature=0.6,
+        #     max_tokens=512
+        # )
 
         self.deepseek_r1 = ChatOllama(
             model="deepseek-r1:7b",  # 确保模型名称与本地一致
@@ -234,6 +264,8 @@ class MultiModalRAG:
             temperature=0.6,
             max_tokens=512  # 回答字数限制,1个token ≈ 3-4个英文字符 或 1-2个中文字符
         )
+
+        self.llm_cache = LLMCache()
 
     def init_vector_db(self, db_name):
         vector_db_path = PROJECT_ROOT + "/agent/" + db_name
@@ -296,9 +328,33 @@ class MultiModalRAG:
         logger.info(f"knowledge retrieval from vector_db is: {context}")
         return context
 
-    def ask_llm(self, prompt, system_prompt=None):
+    def ask_llm(self, prompt, system_prompt=None, model="local_deepseek_r1"):
         # 记录开始时间
         start_time = time.time()
+        """先查缓存，再调用 LLM"""
+        cached_response = self.llm_cache.get_from_cache(system_prompt, prompt)
+        if cached_response:
+            logger.info("llm cache hit")
+            return cached_response
+
+        # 调用模型获取回答
+        if model == "api":
+            response = self.ask_llm_api(prompt, system_prompt)
+        else:
+            response = self.ask_local_llm(prompt, system_prompt)
+
+        # 保存缓存
+        self.llm_cache.save_to_cache(system_prompt, prompt, response)
+        # 计算并打印执行时间
+        end_time = time.time()
+        execution_time = end_time - start_time
+        logger.info(f"finish ask_llm, running cost time {execution_time:.6f} seconds")
+        return response
+
+    def ask_llm_api(self, prompt, system_prompt):
+        pass
+
+    def ask_local_llm(self, prompt, system_prompt):
         # 构建提示模板
         prompt_template = ChatPromptTemplate.from_messages([
             ("system", system_prompt),  # 系统提示词
@@ -310,12 +366,7 @@ class MultiModalRAG:
             "input": prompt  # 输入问题
         })
         logger.info(f"llm_response: {response}")
-        parsed_response = parse_deepseek_response(response)
-        # 计算并打印执行时间
-        end_time = time.time()
-        execution_time = end_time - start_time
-        logger.info(f"finish ask_llm, running cost time {execution_time:.6f} seconds")
-        return parsed_response
+        return response
 
     def read_caption(self, captions, sample_idx):
         video_caption = {}
@@ -355,7 +406,7 @@ class MultiModalRAG:
         response = self.ask_llm(prompt=prompt, system_prompt=LLM_DEFAULT_SYSTEM_PROMPT)
         return prompt, response
 
-    def self_eval(self, previous_information, inference_path, answer):
+    def self_eval(self, previous_information, answer):
         self_eval_prompt = LLM_SELF_EVAL_PROMPT.format(
             previous_information=previous_information,
             answer=answer,
@@ -373,50 +424,21 @@ class MultiModalRAG:
         sampled_caps = self.read_caption(caps, sample_idx)
         count_frame = len(sample_idx)
 
-        i = 0
-        max_round = 1
-        score_flag = False
-        final_answer = None
-        while i < max_round:
-            # # step1:s1阶段：调用小模型，生成采样策略和vlm提示词
-            # previous_prompt, s2_parsed_response = self.ask_llm_sample_frame_with_context(
-            #     formatted_question, sampled_caps, num_frames
-            # )
-            # thought = s2_parsed_response["thought"]
-            # frame_id, vlm_prompt = parsed_answer_s1(s2_parsed_response["answer"])
-            # # save_to_vector_db(self.fact_vector_db, sampled_caps)  # 存储相关事实和推测
-            # # save_to_vector_db(self.spec_vector_db, thought)
-            # fps = 30
-            # # step2:Vlm根据提示词，在指定帧分析图片，获取（实体清单，动态特征，目的分析）
-            # image_path = get_image_path_by_frame_id(video_id, (frame_id - 1) * fps)
-            # image_description = self.ask_vlm(image_path=image_path, prompt=vlm_prompt)
-            # # fact, spec = split_image_description(image_description)  # 解析事实和推理
-            # # save_to_vector_db(self.fact_vector_db, fact)  # 存储相关事实和推测
-            # # save_to_vector_db(self.spec_vector_db, spec)
+        # step1: llm预测答案，生成推理过程
+        previous_prompt, response = self.ask_llm_answer_with_context(
+            formatted_question, sampled_caps, num_frames
+        )
+        s2_parsed_response = parse_deepseek_response(response)
+        answer = parse_json(s2_parsed_response["answer"])
 
-            # step3:S2慢速推理（根据事实产生答案和分析过程）; llm预测答案，生成推理过程
-            previous_prompt, s2_parsed_response = self.ask_llm_answer_with_context(
-                formatted_question, sampled_caps, num_frames
-            )
+        # step2:反思评估器，校验推理过程是否合理，给出答案的置信度
+        response = self.self_eval(previous_prompt, answer)
+        parsed_self_eval_response = parse_deepseek_response(response)
+        confidence = parse_self_eval_response_find_confidence(parsed_self_eval_response["answer"])
 
-            inference_path = s2_parsed_response["thought"]
-            answer = parsed_answer_s2(s2_parsed_response["answer"])
-            # save_to_vector_db(self.fact_vector_db, sampled_caps)  # 存储相关事实和推测
-            # save_to_vector_db(self.spec_vector_db, thought)
-
-            # step4:反思评估器，校验推理过程是否合理，给出答案的置信度
-            # previous_information = get_previous_information(inference_path)
-            parsed_self_eval_response = self.self_eval(previous_prompt, inference_path, answer)
-            # inference_path = parsed_self_eval_response["thought"]
-            confidence = parse_self_eval_response_find_confidence(parsed_self_eval_response["answer"])
-            if confidence == 3:
-                score_flag = True
-                final_answer = answer
-                break
-            i = i + 1
         # 返回答案
-        if score_flag:
-            return final_answer, count_frame
+        if confidence == 3:
+            return answer, count_frame
         else:
             logger.info(f"no answer in process video_id: {video_id}, guessed an answer")
             return random.randint(0, 4), count_frame
