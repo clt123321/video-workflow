@@ -137,6 +137,22 @@ def extract_frame(video_id):
     """)
 
 
+def save_json(data, file_path, ensure_ascii=False):
+    """保存JSON数据到指定路径，自动创建不存在的目录
+
+    Args:
+        data: 要保存的Python对象
+        file_path: 完整的文件保存路径
+        ensure_ascii: 是否转义非ASCII字符（默认False）
+    """
+    # 创建父目录（如果不存在）
+    os.makedirs(os.path.dirname(file_path), exist_ok=True)
+
+    # 使用with语句安全写入文件
+    with open(file_path, 'w', encoding='utf-8') as f:
+        json.dump(data, f, ensure_ascii=ensure_ascii)
+
+
 def run_one_question(video_id, ann, caps, rag_system):
     """
     处理单个视频问题的函数。
@@ -175,7 +191,11 @@ def run_one_question(video_id, ann, caps, rag_system):
         "count_frame": count_frame,
         "execution_time": execution_time,
     }
-    output_json = PROJECT_ROOT + f"data/output/answer/egoschema_subset_{video_id}.json"  # 运行结果存储
-    json.dump(answer_json, open(output_json, "w"))
+    output_json_path = os.path.join(
+        PROJECT_ROOT,
+        "data/output/answer",
+        f"egoschema_subset_{video_id}.json"
+    )
+    save_json(answer_json, output_json_path)
     logger.info(f"video_id ={video_id}, end to run_one_question")
     logger.info("***********************************")

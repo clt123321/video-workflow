@@ -135,7 +135,9 @@ def save_to_vector_db(fact_vector_db, sampled_caps):
 
 
 def get_image_path_by_frame_id(video_id, frame_id):
-    return PROJECT_ROOT + "/data/output/extracted_frames/" + video_id + f"/frame_{frame_id:05d}.jpg"
+    return os.path.join(
+        PROJECT_ROOT, "data", "output", "extracted_frames", str(video_id), f"frame_{frame_id:05d}.jpg"
+    )
 
 
 def parsed_answer_s2(answer_str):
@@ -405,7 +407,7 @@ class MultiModalRAG:
             # step4:反思评估器，校验推理过程是否合理，给出答案的置信度
             # previous_information = get_previous_information(inference_path)
             parsed_self_eval_response = self.self_eval(previous_prompt, inference_path, answer)
-            inference_path = parsed_self_eval_response["thought"]
+            # inference_path = parsed_self_eval_response["thought"]
             confidence = parse_self_eval_response_find_confidence(parsed_self_eval_response["answer"])
             if confidence == 3:
                 score_flag = True
@@ -416,6 +418,7 @@ class MultiModalRAG:
         if score_flag:
             return final_answer, count_frame
         else:
+            logger.info(f"no answer in process video_id: {video_id}, guessed an answer")
             return random.randint(0, 4), count_frame
 
 

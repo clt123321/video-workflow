@@ -31,7 +31,6 @@ def main():
     logger.info("start main")
     input_q_a_file = "data/input/subset_anno.json"  # 问题id和问题内容
     image_cap_file = "data/input/lavila_subset.json"  # 用lavila预处理，每帧的字幕文本
-
     anns = json.load(open(input_q_a_file, "r"))
     all_caps = json.load(open(image_cap_file, "r"))
 
@@ -39,7 +38,7 @@ def main():
     # step 初始化系统
     rag_system = MultiModalRAG()
 
-    for i in range(2):
+    for i in range(500):
         video_id = task_id_list[i]
         run_one_question(video_id, anns[video_id], all_caps[video_id], rag_system)
 
