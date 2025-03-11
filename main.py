@@ -40,7 +40,7 @@ def main():
     # step 初始化系统
     rag_system = MultiModalRAG()
 
-    for i in range(1):
+    for i in range(500):
         video_id = task_id_list[i]
 
         # # 跳过已经得到答案的

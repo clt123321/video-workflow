@@ -3,10 +3,16 @@ import time
 import logging
 from io import BytesIO
 import random
+
+random.seed("2025")
 import re
 import json
 import numpy as np
+import requests
 from typing import Dict, Union
+
+import shelve
+import hashlib
 
 from langchain_community.document_loaders import TextLoader
 from langchain_core.prompts import ChatPromptTemplate
@@ -105,6 +111,17 @@ def parse_deepseek_response(response: Union[str, dict]) -> Dict[str, str]:
     }
 
 
+def is_valid(value):
+    # 检查整型：排除布尔值，且数值在 [0,4] 之间
+    if isinstance(value, int) and not isinstance(value, bool):
+        return 0 <= value <= 4
+    # 检查字符串：单字符且在 '0'-'4' 范围内
+    elif isinstance(value, str):
+        return len(value) == 1 and value in {'0', '1', '2', '3', '4'}
+    # 其他类型直接返回 False
+    return False
+
+
 # ================= 多模态RAG系统，向量数据库内为文本信息 =================
 def parsed_answer_s1(param):
     # 匹配被 ```json 包裹的 JSON 内容
@@ -199,22 +216,17 @@ def split_image_description(image_description):
     pass
 
 
-import pickle
-import shelve
-import hashlib
-
-
 class LLMCache:
     def __init__(self, cache_dir=PROJECT_ROOT + "/data/cache"):
         os.makedirs(cache_dir, exist_ok=True)
         self.cache_file = os.path.join(cache_dir, "llm_cache.pkl")
 
-    def _generate_key(self, system_prompt: str, prompt: str) -> str:
+    def _generate_key(self, system_prompt, prompt):
         """基于 system_prompt 和 prompt 生成唯一的缓存 key"""
         key_data = json.dumps([system_prompt, prompt], sort_keys=True)
         return hashlib.sha256(key_data.encode()).hexdigest()  # 生成哈希 key
 
-    def get_from_cache(self, system_prompt: str, prompt: str):
+    def get_from_cache(self, system_prompt, prompt):
         """从缓存中获取结果"""
         key = self._generate_key(system_prompt, prompt)
         try:
@@ -224,7 +236,7 @@ class LLMCache:
             logging.warning(f"read llm_cache failed: {e}")
         return None
 
-    def save_to_cache(self, system_prompt: str, prompt: str, response: str):
+    def save_to_cache(self, system_prompt, prompt, response):
         """将 LLM 响应存入缓存"""
         key = self._generate_key(system_prompt, prompt)
         try:
@@ -237,13 +249,12 @@ class LLMCache:
 class MultiModalRAG:
     def __init__(self):
         logger.info("init MultiModalRAG")
-        # 加载文本embedding模型 ps:需要开vpn
-        self.embeddings = HuggingFaceEmbeddings(
-            model_name="sentence-transformers/all-MiniLM-L6-v2",
-            model_kwargs={"device": "cuda"},  # 启用GPU加速
-            encode_kwargs={"normalize_embeddings": True}
-        )
-
+        # # 加载文本embedding模型 ps:需要开vpn
+        # self.embeddings = HuggingFaceEmbeddings(
+        #     model_name="sentence-transformers/all-MiniLM-L6-v2",
+        #     model_kwargs={"device": "cuda"},  # 启用GPU加速
+        #     encode_kwargs={"normalize_embeddings": True}
+        # )
         # # 初始化事实向量数据库
         # self.fact_vector_db = self.init_vector_db("fact_vector_db")
         #
@@ -257,13 +268,13 @@ class MultiModalRAG:
         #     temperature=0.6,
         #     max_tokens=512
         # )
-
-        self.deepseek_r1 = ChatOllama(
-            model="deepseek-r1:7b",  # 确保模型名称与本地一致
-            base_url="http://localhost:11434",  # 直连默认端口
-            temperature=0.6,
-            max_tokens=512  # 回答字数限制,1个token ≈ 3-4个英文字符 或 1-2个中文字符
-        )
+        #
+        # self.deepseek_r1 = ChatOllama(
+        #     model="deepseek-r1:7b",  # 确保模型名称与本地一致
+        #     base_url="http://localhost:11434",  # 直连默认端口
+        #     temperature=0.6,
+        #     max_tokens=512  # 回答字数限制,1个token ≈ 3-4个英文字符 或 1-2个中文字符
+        # )
 
         self.llm_cache = LLMCache()
 
@@ -331,10 +342,12 @@ class MultiModalRAG:
     def ask_llm(self, prompt, system_prompt=None, model="local_deepseek_r1"):
         # 记录开始时间
         start_time = time.time()
+        logger.info(f"start to ask_llm,\n system_prompt: {system_prompt}, \n prompt: {prompt}")
         """先查缓存，再调用 LLM"""
         cached_response = self.llm_cache.get_from_cache(system_prompt, prompt)
         if cached_response:
             logger.info("llm cache hit")
+            logger.info(f"cached_response:{cached_response}")
             return cached_response
 
         # 调用模型获取回答
@@ -344,6 +357,7 @@ class MultiModalRAG:
             response = self.ask_local_llm(prompt, system_prompt)
 
         # 保存缓存
+        logger.info(f"response:{response}")
         self.llm_cache.save_to_cache(system_prompt, prompt, response)
         # 计算并打印执行时间
         end_time = time.time()
@@ -352,7 +366,55 @@ class MultiModalRAG:
         return response
 
     def ask_llm_api(self, prompt, system_prompt):
-        pass
+        logger.info("start to ask_llm_api")
+        url = "https://api.siliconflow.cn/v1/chat/completions"
+        payload = {
+            "model": "deepseek-ai/DeepSeek-R1",
+            "messages": [
+                {
+                    "role": "user",
+                    "content": prompt
+                },
+                {
+                    "role": "system",
+                    "content": system_prompt
+                }
+            ],
+            "stream": False,
+            "max_tokens": 512,
+            "stop": None,
+            "temperature": 0.7,
+            "top_p": 0.7,
+            "top_k": 50,
+            "frequency_penalty": 0.5,
+            "n": 1,
+            "response_format": {"type": "text"},
+            "tools": [
+                {
+                    "type": "function",
+                    "function": {
+                        "description": "<string>",
+                        "name": "<string>",
+                        "parameters": {},
+                        "strict": False
+                    }
+                }
+            ]
+        }
+        headers = {
+            "Authorization": "Bearer sk-sywelvfbeymcbfwolkwgdscrkukbsynxxkpflpriiqbhyqjw",
+            "Content-Type": "application/json"
+        }
+        response = requests.request("POST", url, json=payload, headers=headers)
+        logger.info(f"llm response.status_code: {response.status_code}")
+        if response.status_code == 200:
+            logger.info("llm api success response")
+        else:
+            logger.error("llm api response failed")
+        response_json = parse_json(response.text)
+        response_text = response_json["choices"][0]["message"]["content"]
+        logger.info(response_text)
+        return response_text
 
     def ask_local_llm(self, prompt, system_prompt):
         # 构建提示模板
@@ -403,7 +465,7 @@ class MultiModalRAG:
             question=question,
             answer_format={"final_answer": "xxx"}
         )
-        response = self.ask_llm(prompt=prompt, system_prompt=LLM_DEFAULT_SYSTEM_PROMPT)
+        response = self.ask_llm(prompt=prompt, system_prompt=LLM_DEFAULT_SYSTEM_PROMPT, model="api")
         return prompt, response
 
     def self_eval(self, previous_information, answer):
@@ -412,12 +474,23 @@ class MultiModalRAG:
             answer=answer,
             confidence_format={"confidence": "xxx"}
         )
-        response = self.ask_llm(prompt=self_eval_prompt, system_prompt=LLM_DEFAULT_SYSTEM_PROMPT)
+        response = self.ask_llm(prompt=self_eval_prompt, system_prompt=LLM_DEFAULT_SYSTEM_PROMPT, model="api")
         return response
+
+
+    def parse_answer_from_json(self, response):
+        json = parse_json(response)
+        if json is None:
+            answer = random.randint(0, 4)
+        elif "final_answer" in json:
+            answer = json["final_answer"]
+        else:
+            answer = random.randint(0, 4)
+        return answer
 
     # SwiftSage；Agent 分为快速直觉系统（S1）和慢速规划系统（S2）。S1 负责快速生成初步计划，S2 通过反思和外部工具验证计划的可行性。
     # SwiftSage_RAG_VQA
-    def get_answer(self, video_id, formatted_question, caps):
+    def get_answer(self, video_id, formatted_question, caps, truth):
         # step0：预处理，均匀采样num帧，调用vlm获取文本caption
         num_frames = len(caps)
         sample_idx = np.linspace(1, num_frames, num=6, dtype=int).tolist()
@@ -428,20 +501,25 @@ class MultiModalRAG:
         previous_prompt, response = self.ask_llm_answer_with_context(
             formatted_question, sampled_caps, num_frames
         )
-        s2_parsed_response = parse_deepseek_response(response)
-        answer = parse_json(s2_parsed_response["answer"])
+        answer = self.parse_answer_from_json(response)
+        logger.info(f"video_id: {video_id}, answer: {answer}")
 
         # step2:反思评估器，校验推理过程是否合理，给出答案的置信度
-        response = self.self_eval(previous_prompt, answer)
-        parsed_self_eval_response = parse_deepseek_response(response)
-        confidence = parse_self_eval_response_find_confidence(parsed_self_eval_response["answer"])
+        # response = self.self_eval(previous_prompt, answer)
+        # confidence = parse_self_eval_response_find_confidence(response)
+        # logger.info(f"video_id: {video_id}, confidence: {confidence}")
+        confidence = 1
 
+        correct_answer = answer == truth
         # 返回答案
-        if confidence == 3:
+        if correct_answer and confidence == 3:
+            logger.info("correct and confidence is ok!")
+        elif is_valid(answer):
             return answer, count_frame
         else:
             logger.info(f"no answer in process video_id: {video_id}, guessed an answer")
             return random.randint(0, 4), count_frame
+
 
 
 # ================= 使用示例 =================

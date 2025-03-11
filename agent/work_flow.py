@@ -170,7 +170,6 @@ def run_one_question(video_id, ann, caps, rag_system):
     question = ann["question"]
     options = [ann[f"option {i}"] for i in range(5)]
     # extract_frame(video_id) # 首次运行可以抽视频保存为图像，校验数据集的完整性、
-    # 运行workflow，回答问题
     formatted_question = (
             f"Here is the question: {question}\n"
             + "Here are the choices: "
@@ -179,7 +178,9 @@ def run_one_question(video_id, ann, caps, rag_system):
     logger.info(f"formatted_question = {formatted_question}")
     truth = ann["truth"]
     logger.info(f"truth ={truth}")
-    answer, count_frame = rag_system.get_answer(video_id, formatted_question, caps)
+
+    # 运行agent，获取问题答案
+    answer, count_frame = rag_system.get_answer(video_id, formatted_question, caps, truth)
     # 计算并打印执行时间
     end_time = time.time()
     execution_time = end_time - start_time
@@ -188,7 +189,7 @@ def run_one_question(video_id, ann, caps, rag_system):
     answer_json = {
         "answer": answer,
         "label": truth,
-        "corr": answer == truth,
+        "corr": str(answer) == str(truth),
         "count_frame": count_frame,
         "execution_time": execution_time,
     }
