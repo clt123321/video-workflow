@@ -4,6 +4,8 @@ import logging
 from io import BytesIO
 import random
 
+from numpy.f2py.auxfuncs import throw_error
+
 random.seed("2025")
 import re
 import json
@@ -25,7 +27,7 @@ from langchain_core.documents import Document
 from PIL import Image
 import base64
 
-from config import PROJECT_ROOT
+from config import PROJECT_ROOT, API_KEY
 from data.prompt.const_prompt import LLM_DEFAULT_SYSTEM_PROMPT, LLM_GIVE_ANSER_BY_CAPTION_PROMPT, LLM_SELF_EVAL_PROMPT, \
     LLM_SAMPLE_FRAME_WITH_CONTEXT_PROMPT
 
@@ -216,6 +218,11 @@ def split_image_description(image_description):
     pass
 
 
+class RetriesExhaustedError(Exception):
+    """自定义异常：重试次数耗尽"""
+    pass
+
+
 class LLMCache:
     def __init__(self, cache_dir=PROJECT_ROOT + "/data/cache"):
         os.makedirs(cache_dir, exist_ok=True)
@@ -356,7 +363,9 @@ class MultiModalRAG:
         else:
             response = self.ask_local_llm(prompt, system_prompt)
 
-        # 保存缓存
+        if not response:
+            raise ConnectionError("api连接失败，请检查网络")
+            # 保存缓存
         logger.info(f"response:{response}")
         self.llm_cache.save_to_cache(system_prompt, prompt, response)
         # 计算并打印执行时间
@@ -402,19 +411,30 @@ class MultiModalRAG:
             ]
         }
         headers = {
-            "Authorization": "Bearer sk-sywelvfbeymcbfwolkwgdscrkukbsynxxkpflpriiqbhyqjw",
+            "Authorization": "Bearer " + API_KEY,
             "Content-Type": "application/json"
         }
-        response = requests.request("POST", url, json=payload, headers=headers)
-        logger.info(f"llm response.status_code: {response.status_code}")
-        if response.status_code == 200:
-            logger.info("llm api success response")
-        else:
-            logger.error("llm api response failed")
-        response_json = parse_json(response.text)
-        response_text = response_json["choices"][0]["message"]["content"]
-        logger.info(response_text)
-        return response_text
+
+        retries = 0
+        while retries < 3:
+            try:
+                response = requests.request("POST", url, json=payload, headers=headers)
+                retries += 1
+                logger.info(f"llm response.status_code: {response.status_code}")
+                if response.status_code == 200:
+                    logger.info("llm api success response")
+                    response_json = parse_json(response.text)
+                    response_text = response_json["choices"][0]["message"]["content"]
+                    logger.info(response_text)
+                    return response_text
+                else:
+                    logger.error("llm api response failed for 3 times")
+            except Exception as e:  # 兜底异常
+                retries += 1
+                logger.error(f"连接失败，第 {retries} 次重试（错误：{e}）")
+                time.sleep(5)  # 10s后重新尝试
+        logger.error("llm api response failed for 3 times")
+        return None
 
     def ask_local_llm(self, prompt, system_prompt):
         # 构建提示模板
@@ -477,7 +497,6 @@ class MultiModalRAG:
         response = self.ask_llm(prompt=self_eval_prompt, system_prompt=LLM_DEFAULT_SYSTEM_PROMPT, model="api")
         return response
 
-
     def parse_answer_from_json(self, response):
         json = parse_json(response)
         if json is None:
@@ -505,21 +524,20 @@ class MultiModalRAG:
         logger.info(f"video_id: {video_id}, answer: {answer}")
 
         # step2:反思评估器，校验推理过程是否合理，给出答案的置信度
-        # response = self.self_eval(previous_prompt, answer)
-        # confidence = parse_self_eval_response_find_confidence(response)
-        # logger.info(f"video_id: {video_id}, confidence: {confidence}")
-        confidence = 1
+        response = self.self_eval(previous_prompt, answer)
+        confidence = parse_self_eval_response_find_confidence(response)
+        logger.info(f"video_id: {video_id}, confidence: {confidence}")
 
-        correct_answer = answer == truth
+        correct_answer = str(answer) == str(truth)
         # 返回答案
         if correct_answer and confidence == 3:
             logger.info("correct and confidence is ok!")
+            return answer, count_frame
         elif is_valid(answer):
             return answer, count_frame
         else:
             logger.info(f"no answer in process video_id: {video_id}, guessed an answer")
             return random.randint(0, 4), count_frame
-
 
 
 # ================= 使用示例 =================
