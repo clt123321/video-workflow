@@ -5,7 +5,7 @@ import os
 
 import cv2
 
-from agent.langchain_workflow1 import clean_vector_db, parse_deepseek_response
+from agent.langchain_workflow1 import clean_vector_db, parse_deepseek_response, MultiModalRAG
 from config import PROJECT_ROOT
 from data.prompt.const_prompt import LLM_GET_ANSWER_SYSTEM_PROMPT, LLM_DEFAULT_SYSTEM_PROMPT
 
@@ -117,10 +117,8 @@ def test_rag_vlm(rag_system):
 
 def test_llm(rag_system):
     question = "请写一个反转列表的代码"
-    response = rag_system.ask_llm(prompt=question, system_prompt=LLM_DEFAULT_SYSTEM_PROMPT)
-    parsed_response = parse_deepseek_response(response)
-    logger.info("思考过程：\n" + parsed_response["thought"])
-    logger.info("回答：\n" + parsed_response["answer"])
+    response = rag_system.ask_llm(prompt=question, system_prompt=LLM_DEFAULT_SYSTEM_PROMPT,model="api")
+    print("回答：\n" + response)
 
 
 def extract_frame(video_id):

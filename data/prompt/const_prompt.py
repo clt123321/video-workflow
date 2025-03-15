@@ -100,6 +100,8 @@ The provided information is as as follows,
 {previous_information}
 The decision making process is as follows,
 {answer}
+The thinking process of the previous large language model is as follows,
+{thinking_process}
 Criteria for Evaluation:
 Insufficient Information (Confidence Level: 1): If information is too lacking for a reasonable conclusion.
 Partial Information (Confidence Level: 2): If information partially supports an informed guess.

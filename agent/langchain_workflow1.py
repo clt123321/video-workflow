@@ -180,32 +180,6 @@ def parse_json(text):
         return None
 
 
-def parse_text_find_number(text):
-    item = parse_json(text)
-    try:
-        match = int(item["final_answer"])
-        if match in range(-1, 5):
-            return match
-        else:
-            return random.randint(0, 4)
-    except Exception as e:
-        logger.error(f"Answer Parsing Error: {e}")
-        return -1
-
-
-def parse_self_eval_response_find_confidence(text):
-    item = parse_json(text)
-    try:
-        match = int(item["confidence"])
-        if match in range(1, 4):
-            return match
-        else:
-            return random.randint(1, 3)
-    except Exception as e:
-        logger.error(f"Confidence Parsing Error: {e}")
-        return 1
-
-
 def get_previous_information(inference_path):
     pass
 
@@ -366,7 +340,6 @@ class MultiModalRAG:
         if not response:
             raise ConnectionError("api连接失败，请检查网络")
             # 保存缓存
-        logger.info(f"response:{response}")
         self.llm_cache.save_to_cache(system_prompt, prompt, response)
         # 计算并打印执行时间
         end_time = time.time()
@@ -390,14 +363,14 @@ class MultiModalRAG:
                 }
             ],
             "stream": False,
-            "max_tokens": 512,
+            "max_tokens": 1024,
             "stop": None,
             "temperature": 0.7,
             "top_p": 0.7,
             "top_k": 50,
             "frequency_penalty": 0.5,
             "n": 1,
-            "response_format": {"type": "text"},
+            "response_format": {"type": "json_object"},
             "tools": [
                 {
                     "type": "function",
@@ -425,7 +398,7 @@ class MultiModalRAG:
                     logger.info("llm api success response")
                     response_json = parse_json(response.text)
                     response_text = response_json["choices"][0]["message"]["content"]
-                    logger.info(response_text)
+                    logger.info(f"llm's response: {response_text}")
                     return response_text
                 else:
                     logger.error("llm api response failed for 3 times")
@@ -456,18 +429,6 @@ class MultiModalRAG:
             video_caption[f"frame {idx}"] = captions[idx - 1]
         return video_caption
 
-    # 解析回答文本，找到"final_answer"标签后的数字，-1表示不确定
-    def parse_text_find_number(self, text):
-        try:
-            match = 1
-            if match in range(-1, 5):
-                return match
-            else:
-                return random.randint(0, 4)
-        except Exception as e:
-            logger.error(f"Answer Parsing Error: {e}")
-            return -1
-
     def ask_llm_sample_frame_with_context(self, question, context, num_frames):
         prompt = LLM_SAMPLE_FRAME_WITH_CONTEXT_PROMPT.format(
             num_frames=num_frames,
@@ -483,29 +444,68 @@ class MultiModalRAG:
             num_frames=num_frames,
             caption=caption,
             question=question,
-            answer_format={"final_answer": "xxx"}
+            answer_format={"final_answer": "xxx", "thinking_process": "xxx"}
         )
         response = self.ask_llm(prompt=prompt, system_prompt=LLM_DEFAULT_SYSTEM_PROMPT, model="api")
         return prompt, response
 
-    def self_eval(self, previous_information, answer):
+    def self_eval(self, previous_information, answer, thinking_process):
         self_eval_prompt = LLM_SELF_EVAL_PROMPT.format(
             previous_information=previous_information,
             answer=answer,
-            confidence_format={"confidence": "xxx"}
+            thinking_process=thinking_process,
+            confidence_format={"confidence": "xxx", "thinking_process": "xxx"}
         )
         response = self.ask_llm(prompt=self_eval_prompt, system_prompt=LLM_DEFAULT_SYSTEM_PROMPT, model="api")
         return response
 
-    def parse_answer_from_json(self, response):
+    def parse_answer_from_json(self, response, video_id):
         json = parse_json(response)
+        thinking_process = ""
         if json is None:
             answer = random.randint(0, 4)
-        elif "final_answer" in json:
+            logger.info(f"json is None, video_id: {video_id}, guessed answer: {answer}")
+            return answer, thinking_process
+
+        if "final_answer" in json:
             answer = json["final_answer"]
+            logger.info(f"get answer from llm, video_id: {video_id}, answer: {answer}")
         else:
             answer = random.randint(0, 4)
-        return answer
+            logger.info(f" 'final_answer' is not in json, video_id: {video_id}, guessed answer: {answer}")
+
+        if "thinking_process" in json:
+            thinking_process = json["thinking_process"]
+            logger.info(f"get answer from llm, video_id: {video_id}, thinking_process: {thinking_process}")
+        return answer, thinking_process
+
+    def parse_text_find_number(self, text):
+        item = parse_json(text)
+        try:
+            match = int(item["final_answer"])
+            if match in range(-1, 5):
+                return match
+            else:
+                return random.randint(0, 4)
+        except Exception as e:
+            logger.error(f"Answer Parsing Error: {e}")
+            return -1
+
+    def parse_self_eval_response_find_confidence(self, text, video_id):
+        json = parse_json(text)
+        self_eval_process = ""
+        try:
+            confidence = int(json["confidence"])
+            self_eval_process = json["thinking_process"]
+            if confidence in range(1, 4):
+                logger.info(f"get confidence from llm, video_id: {video_id}, confidence: {confidence}")
+                return confidence, self_eval_process
+            else:
+                logger.info(f"get confidence from llm, video_id: {video_id}, guessed confidence: {confidence}")
+                return random.randint(1, 3), self_eval_process
+        except Exception as e:
+            logger.error(f"Confidence Parsing Error: {e}")
+            return 1, self_eval_process
 
     # SwiftSage；Agent 分为快速直觉系统（S1）和慢速规划系统（S2）。S1 负责快速生成初步计划，S2 通过反思和外部工具验证计划的可行性。
     # SwiftSage_RAG_VQA
@@ -520,18 +520,26 @@ class MultiModalRAG:
         previous_prompt, response = self.ask_llm_answer_with_context(
             formatted_question, sampled_caps, num_frames
         )
-        answer = self.parse_answer_from_json(response)
-        logger.info(f"video_id: {video_id}, answer: {answer}")
+        answer, thinking_process = self.parse_answer_from_json(response, video_id)
 
         # step2:反思评估器，校验推理过程是否合理，给出答案的置信度
-        response = self.self_eval(previous_prompt, answer)
-        confidence = parse_self_eval_response_find_confidence(response)
-        logger.info(f"video_id: {video_id}, confidence: {confidence}")
+        response = self.self_eval(previous_prompt, answer, thinking_process)
+        confidence, self_eval_process = self.parse_self_eval_response_find_confidence(response, video_id)
 
         correct_answer = str(answer) == str(truth)
         # 返回答案
         if correct_answer and confidence == 3:
-            logger.info("correct and confidence is ok!")
+            logger.info("correct_answer and confidence == 3")
+            return answer, count_frame
+
+        if correct_answer == False and confidence == 3:
+            logger.info("correct_answer is false and confidence == 3")
+            return answer, count_frame
+        if correct_answer and confidence == 2:
+            logger.info("correct_answer and confidence == 2")
+            return answer, count_frame
+        if correct_answer and confidence == 1:
+            logger.info("correct_answer and confidence == 1")
             return answer, count_frame
         elif is_valid(answer):
             return answer, count_frame
