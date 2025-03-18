@@ -4,8 +4,6 @@ import logging
 from io import BytesIO
 import random
 
-from numpy.f2py.auxfuncs import throw_error
-
 random.seed("2025")
 import re
 import json
@@ -15,7 +13,9 @@ from typing import Dict, Union
 
 import shelve
 import hashlib
-
+import sqlite3
+import threading
+from pathlib import Path
 from langchain_community.document_loaders import TextLoader
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -197,34 +197,124 @@ class RetriesExhaustedError(Exception):
     pass
 
 
+#
+# class LLMCache:
+#     def __init__(self, cache_dir=PROJECT_ROOT + "/data/cache"):
+#         os.makedirs(cache_dir, exist_ok=True)
+#         self.cache_file = os.path.join(cache_dir, "llm_cache.pkl")
+#
+#     def _generate_key(self, system_prompt, prompt):
+#         """基于 system_prompt 和 prompt 生成唯一的缓存 key"""
+#         key_data = json.dumps([system_prompt, prompt], sort_keys=True)
+#         return hashlib.sha256(key_data.encode()).hexdigest()  # 生成哈希 key
+#
+#     def get_from_cache(self, system_prompt, prompt):
+#         """从缓存中获取结果"""
+#         key = self._generate_key(system_prompt, prompt)
+#         try:
+#             with shelve.open(self.cache_file, flag="r") as cache:
+#                 return cache.get(key, None)
+#         except Exception as e:
+#             logging.warning(f"read llm_cache failed: {e}")
+#         return None
+#
+#     def save_to_cache(self, system_prompt, prompt, response):
+#         """将 LLM 响应存入缓存"""
+#         key = self._generate_key(system_prompt, prompt)
+#         try:
+#             with shelve.open(self.cache_file) as cache:
+#                 cache[key] = response
+#         except Exception as e:
+#             logging.warning(f"保存缓存失败: {e}")
+
 class LLMCache:
-    def __init__(self, cache_dir=PROJECT_ROOT + "/data/cache"):
-        os.makedirs(cache_dir, exist_ok=True)
-        self.cache_file = os.path.join(cache_dir, "llm_cache.pkl")
+    _local = threading.local()  # 线程本地存储
+    _lock = threading.Lock()  # 类级锁用于DDL操作
+
+    def __init__(self, cache_dir=None):
+        # 设置缓存路径
+        self.cache_dir = cache_dir or Path(PROJECT_ROOT + "/data/cache")
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
+
+        # 数据库文件路径
+        self.db_path = self.cache_dir / "llm_cache.db"
+
+        # 初始化数据库结构
+        self._init_db()
+
+    def _get_conn(self):
+        """获取线程独立的数据库连接"""
+        if not hasattr(LLMCache._local, "conn"):
+            conn = sqlite3.connect(
+                self.db_path,
+                timeout=30,  # 增加超时时间
+                check_same_thread=False  # 允许多线程复用
+            )
+            conn.execute("PRAGMA journal_mode=WAL")  # 启用WAL模式提升并发
+            LLMCache._local.conn = conn
+        return LLMCache._local.conn
+
+    def _init_db(self):
+        """初始化数据库表结构（线程安全）"""
+        with LLMCache._lock:
+            conn = self._get_conn()
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS llm_cache (
+                    key TEXT PRIMARY KEY,
+                    system_prompt TEXT,
+                    prompt TEXT,
+                    response BLOB,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_prompts 
+                ON llm_cache (system_prompt, prompt)
+            """)
+            conn.commit()
 
     def _generate_key(self, system_prompt, prompt):
-        """基于 system_prompt 和 prompt 生成唯一的缓存 key"""
+        """生成唯一缓存键（保持原有逻辑不变）"""
         key_data = json.dumps([system_prompt, prompt], sort_keys=True)
-        return hashlib.sha256(key_data.encode()).hexdigest()  # 生成哈希 key
+        return hashlib.sha256(key_data.encode()).hexdigest()
 
     def get_from_cache(self, system_prompt, prompt):
-        """从缓存中获取结果"""
+        """线程安全的缓存读取"""
         key = self._generate_key(system_prompt, prompt)
         try:
-            with shelve.open(self.cache_file, flag="r") as cache:
-                return cache.get(key, None)
-        except Exception as e:
-            logging.warning(f"read llm_cache failed: {e}")
-        return None
+            conn = self._get_conn()
+            cursor = conn.execute(
+                "SELECT response FROM llm_cache WHERE key = ?",
+                (key,)
+            )
+            result = cursor.fetchone()
+            return result[0] if result else None
+        except sqlite3.Error as e:
+            logging.warning(f"读取缓存失败: {str(e)}")
+            return None
 
     def save_to_cache(self, system_prompt, prompt, response):
-        """将 LLM 响应存入缓存"""
+        """线程安全的缓存写入（自动处理冲突）"""
         key = self._generate_key(system_prompt, prompt)
         try:
-            with shelve.open(self.cache_file) as cache:
-                cache[key] = response
-        except Exception as e:
-            logging.warning(f"保存缓存失败: {e}")
+            conn = self._get_conn()
+            conn.execute("""
+                INSERT INTO llm_cache (key, system_prompt, prompt, response)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(key) DO UPDATE SET
+                    response = excluded.response,
+                    created_at = CURRENT_TIMESTAMP
+            """, (key, system_prompt, prompt, response))
+            conn.commit()
+        except sqlite3.Error as e:
+            logging.error(f"保存缓存失败: {str(e)}")
+            conn.rollback()
+
+    def close(self):
+        """关闭所有数据库连接（应在程序退出时调用）"""
+        if hasattr(LLMCache._local, "conn"):
+            LLMCache._local.conn.close()
+            del LLMCache._local.conn
 
 
 class MultiModalRAG:
@@ -351,7 +441,7 @@ class MultiModalRAG:
         logger.info("start to ask_llm_api")
         url = "https://api.siliconflow.cn/v1/chat/completions"
         payload = {
-            "model": "deepseek-ai/DeepSeek-R1",
+            "model": "deepseek-ai/DeepSeek-V3",
             "messages": [
                 {
                     "role": "user",
@@ -405,7 +495,7 @@ class MultiModalRAG:
             except Exception as e:  # 兜底异常
                 retries += 1
                 logger.error(f"连接失败，第 {retries} 次重试（错误：{e}）")
-                time.sleep(5)  # 10s后重新尝试
+                time.sleep(5)  # 5s后重新尝试
         logger.error("llm api response failed for 3 times")
         return None
 
@@ -454,7 +544,7 @@ class MultiModalRAG:
             previous_information=previous_information,
             answer=answer,
             thinking_process=thinking_process,
-            confidence_format={"confidence": "xxx", "thinking_process": "xxx"}
+            confidence_format={"confidence": "xxx", "thinking_process": "yyy"}
         )
         response = self.ask_llm(prompt=self_eval_prompt, system_prompt=LLM_DEFAULT_SYSTEM_PROMPT, model="api")
         return response
