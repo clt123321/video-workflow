@@ -44,17 +44,35 @@ def extract_video_ids(log_path):
     return video_ids
 
 
-if __name__ == '__main__':
-    # log_file = r"C:\Users\clt\PycharmProjects\video-workflow\log\egoschema_subset.log"
-    # result = extract_video_ids(log_file)
-    #
-    # print(f"Found {len(result)} video_ids:")
-    # print(result[:5])  # 打印前5个示例
-    # print(len(result))  # 打印处理失败的数量（guess）
+def count_string_occurrences(filename=PROJECT_ROOT + "/log/egoschema_subset.log", target=None):
+    count = 0
+    with open(filename, 'r', encoding='utf-8') as f:  # 指定编码为 utf-8
+        for line in f:
+            count += line.count(target)
+    return count
 
+
+if __name__ == '__main__':
     output_json_path = os.path.join(
         PROJECT_ROOT,
         "data/output/answer"
     )
     accuracy = calculate_corr_true_ratio(output_json_path)
     print(f"Mean accuracy: {accuracy}")
+
+    TP = count_string_occurrences(target="correct_answer and confidence == 3")
+    FN = count_string_occurrences(target="correct_answer and confidence != 3")
+    FP = count_string_occurrences(target="correct_answer is false and confidence == 3")
+    TN = count_string_occurrences(target="correct_answer is false is false and confidence != 3")
+    ALL = TP + FP + FN + TN
+    print(f"TP: {TP},FN: {FN},FP: {FP},TN: {TN},ALL: {ALL}")
+    if ALL != 500:
+        exit()
+    ac = (TP + TN) / ALL
+    precise_rate = TP / (TP + FP)
+    recall_rate = TP / (TP + FN)
+    Specificity = TN / (TN + FP)
+    print(f"Precision: {precise_rate:.2f}")
+    print(f"precise_rate: {precise_rate:.2f}")
+    print(f"recall_rate: {recall_rate:.2f}")
+    print(f"Specificity: {Specificity:.2f}")

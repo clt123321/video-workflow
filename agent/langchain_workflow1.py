@@ -590,16 +590,16 @@ class MultiModalRAG:
         if correct_answer and confidence == 3:
             logger.info("correct_answer and confidence == 3")
             return answer, count_frame
-
         if correct_answer == False and confidence == 3:
             logger.info("correct_answer is false and confidence == 3")
             return answer, count_frame
-        if correct_answer and confidence == 2:
-            logger.info("correct_answer and confidence == 2")
+        if correct_answer and confidence != 3:
+            logger.info("correct_answer and confidence != 3")
             return answer, count_frame
-        if correct_answer and confidence == 1:
-            logger.info("correct_answer and confidence == 1")
+        if correct_answer == False and confidence != 3:
+            logger.info("correct_answer is false is false and confidence != 3")
             return answer, count_frame
+
         elif is_valid(answer):
             return answer, count_frame
         else:
