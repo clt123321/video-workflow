@@ -196,37 +196,6 @@ class RetriesExhaustedError(Exception):
     """自定义异常：重试次数耗尽"""
     pass
 
-
-#
-# class LLMCache:
-#     def __init__(self, cache_dir=PROJECT_ROOT + "/data/cache"):
-#         os.makedirs(cache_dir, exist_ok=True)
-#         self.cache_file = os.path.join(cache_dir, "llm_cache.pkl")
-#
-#     def _generate_key(self, system_prompt, prompt):
-#         """基于 system_prompt 和 prompt 生成唯一的缓存 key"""
-#         key_data = json.dumps([system_prompt, prompt], sort_keys=True)
-#         return hashlib.sha256(key_data.encode()).hexdigest()  # 生成哈希 key
-#
-#     def get_from_cache(self, system_prompt, prompt):
-#         """从缓存中获取结果"""
-#         key = self._generate_key(system_prompt, prompt)
-#         try:
-#             with shelve.open(self.cache_file, flag="r") as cache:
-#                 return cache.get(key, None)
-#         except Exception as e:
-#             logging.warning(f"read llm_cache failed: {e}")
-#         return None
-#
-#     def save_to_cache(self, system_prompt, prompt, response):
-#         """将 LLM 响应存入缓存"""
-#         key = self._generate_key(system_prompt, prompt)
-#         try:
-#             with shelve.open(self.cache_file) as cache:
-#                 cache[key] = response
-#         except Exception as e:
-#             logging.warning(f"保存缓存失败: {e}")
-
 class LLMCache:
     _local = threading.local()  # 线程本地存储
     _lock = threading.Lock()  # 类级锁用于DDL操作
